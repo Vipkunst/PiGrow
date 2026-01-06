@@ -11,9 +11,9 @@ namespace EEEUUHH.Services
         private readonly IMqttClient _mqttClient;
         private readonly MqttClientOptions _options;
         private readonly IConfiguration _configuration;
-        private readonly ILogger _logger;
+        private readonly ILogger<MqttClientService> _logger;
 
-        public MqttClientService(IMemoryCache cache, IConfiguration configuration, ILogger logger)
+        public MqttClientService(IMemoryCache cache, IConfiguration configuration, ILogger<MqttClientService> logger)
         {
             _cache = cache;
             _configuration = configuration;
@@ -22,8 +22,9 @@ namespace EEEUUHH.Services
             _logger = logger;
 
             _options = new MqttClientOptionsBuilder()
-                .WithTcpServer(_configuration.GetConnectionString("MqttServer"), 1883)
-                .WithClientId("WebApiClient")
+                .WithTcpServer(_configuration["Mqtt:Host"], int.Parse(_configuration["Mqtt:Port"]))
+                .WithClientId($"WebApiClient-{Environment.MachineName}-{Guid.NewGuid()}")
+                .WithCredentials(_configuration["Mqtt:Username"], _configuration["Mqtt:Password"])
                 .Build();
 
             // Setup message handler
@@ -48,10 +49,10 @@ namespace EEEUUHH.Services
             }
             catch (Exception ex)
             {
-                // Log if possible
+                _logger.LogError(ex, "MQTT message handling failed");
             }
 
-            await Task.CompletedTask;
+            return;
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
