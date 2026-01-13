@@ -14,6 +14,7 @@ builder.Services.AddSingleton<ILogger>(sp =>
 builder.Services.AddMemoryCache();
 builder.Services.AddHostedService<EEEUUHH.Services.MqttClientService>();
 builder.Services.AddHostedService<EEEUUHH.Services.ConditionCheckerService>();
+builder.Services.AddHostedService<EEEUUHH.Services.ArduinoService>();
 
 var app = builder.Build();
 
