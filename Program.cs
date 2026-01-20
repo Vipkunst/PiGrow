@@ -12,8 +12,14 @@ builder.Logging.AddDebug();
 
 builder.Services.AddSingleton<ILogger>(sp =>
     sp.GetRequiredService<ILoggerFactory>().CreateLogger("Default"));
-builder.Services.AddSingleton<PiGrow.Services.IPiRelayController, PiGrow.Services.PiRelayService>();
-builder.Services.AddSingleton<GpioController>(_ => new GpioController());
+
+// Register platform-specific implementations
+if (OperatingSystem.IsLinux())
+{
+    // On Raspberry Pi / Linux with GPIO support, register the real controller
+    builder.Services.AddSingleton<GpioController>(_ => new GpioController());
+    builder.Services.AddSingleton<PiGrow.Services.IPiRelayController, PiGrow.Services.PiRelayService>();
+}
 
 builder.Services.AddMemoryCache();
 builder.Services.AddHostedService<PiGrow.Services.MqttClientService>();
