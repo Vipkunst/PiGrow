@@ -14,10 +14,11 @@ namespace PiGrow.Services
         private bool _isOn;
         private DateTime _lastOnTime = DateTime.MinValue;
 
-        public PiRelayService(ILogger<PiRelayService> logger, IConfiguration config)
+        public PiRelayService(ILogger<PiRelayService> logger, IConfiguration config, GpioController controller)
         {
             _logger = logger;
             this.config = config;
+            _controller = controller ?? throw new ArgumentNullException(nameof(controller));
 
             _pin = config.GetValue("Relay:Pin", 17); // default GPIO17
             _activeLow = config.GetValue("Relay:ActiveLow", false);
@@ -114,7 +115,6 @@ namespace PiGrow.Services
                     WritePin(false);
                     _controller.ClosePin(_pin);
                 }
-                _controller.Dispose();
             }
             catch (Exception ex)
             {
