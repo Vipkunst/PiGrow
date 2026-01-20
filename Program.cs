@@ -1,3 +1,5 @@
+using System.Device.Gpio;
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
@@ -11,6 +13,7 @@ builder.Logging.AddDebug();
 builder.Services.AddSingleton<ILogger>(sp =>
     sp.GetRequiredService<ILoggerFactory>().CreateLogger("Default"));
 builder.Services.AddSingleton<PiGrow.Services.IPiRelayController, PiGrow.Services.PiRelayService>();
+builder.Services.AddSingleton<GpioController>(_ => new GpioController());
 
 builder.Services.AddMemoryCache();
 builder.Services.AddHostedService<PiGrow.Services.MqttClientService>();
