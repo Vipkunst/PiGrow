@@ -52,8 +52,11 @@ namespace PiGrow.Services
                 _data.TryGetValue("sensor/bme680/humidity", out var humidity);
                 _data.TryGetValue("sensor/bme680/temperature", out var temperature);
 
-                if (humidity != null && Convert.ToDouble(humidity) < humidityThreshold)
+                if (humidity is Classes.SensorData humidityData && 
+                    double.TryParse(humidityData.Message, out double humidityValue) && 
+                    humidityValue < humidityThreshold)
                 {
+                    // ...
                 }
 
                 await Task.Delay(1000, stoppingToken);
