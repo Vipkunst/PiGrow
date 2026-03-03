@@ -49,46 +49,35 @@ namespace PiGrow.Services
 
         public async Task SetStateAsync(bool on, CancellationToken cancellationToken = default)
         {
-            // enforce minimum on time before switching off
+            TimeSpan wait = TimeSpan.Zero;
+
             lock (_lock)
             {
-                if (_isOn == on)
-                    return;
+                if (_isOn == on) return;
 
                 if (!on)
                 {
                     var elapsed = DateTime.UtcNow - _lastOnTime;
                     if (elapsed < _minOnTime)
-                    {
-                        var wait = _minOnTime - elapsed;
-                        _logger.LogInformation("Requested OFF before minOnTime elapsed, will wait {WaitMs}ms", (int)wait.TotalMilliseconds);
-                        // release lock and wait outside
-                        Monitor.Exit(_lock);
-                        try
-                        {
-                            Task.Delay(wait, cancellationToken).GetAwaiter().GetResult();
-                        }
-                        finally
-                        {
-                            Monitor.Enter(_lock);
-                        }
-
-                        // If cancellation requested during wait, abort
-                        if (cancellationToken.IsCancellationRequested)
-                            return;
-                    }
+                        wait = _minOnTime - elapsed;
                 }
-
-                // write pin and update state
-                WritePin(on);
-                if (on)
-                    _lastOnTime = DateTime.UtcNow;
-
-                _isOn = on;
             }
 
-            // small async yield to allow caller to await cancellation if needed
-            await Task.CompletedTask;
+            if (wait > TimeSpan.Zero)
+            {
+                _logger.LogInformation("Waiting {WaitMs}ms before turning OFF", (int)wait.TotalMilliseconds);
+                await Task.Delay(wait, cancellationToken); // properly async, outside the lock
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+
+            lock (_lock)
+            {
+                if (_isOn == on) return; // re-check after the await
+                WritePin(on);
+                if (on) _lastOnTime = DateTime.UtcNow;
+                _isOn = on;
+            }
         }
 
         private void WritePin(bool on)
