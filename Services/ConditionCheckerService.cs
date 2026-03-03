@@ -9,7 +9,7 @@ namespace PiGrow.Services
         private readonly IPiRelayController _relayController;
 
         private readonly bool _runStartupTest = true;
-        private readonly TimeSpan _testPulseDuration = TimeSpan.FromSeconds(5);
+        private readonly TimeSpan _testPulseDuration = TimeSpan.FromSeconds(10);
 
         public ConditionCheckerService(IMemoryCache data, ILogger<ConditionCheckerService> logger, IPiRelayController relayService)
         {
