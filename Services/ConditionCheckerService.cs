@@ -32,7 +32,7 @@ namespace PiGrow.Services
                     await _relayController.SetStateAsync(true, stoppingToken);
                     await Task.Delay(_testPulseDuration, stoppingToken);
                     await _relayController.SetStateAsync(false, stoppingToken);
-                    _logger.LogInformation("Relay test complete: pump OFF");
+                    // _logger.LogInformation("Relay test complete: pump OFF");
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                 {
