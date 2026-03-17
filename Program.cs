@@ -23,6 +23,7 @@ if (OperatingSystem.IsLinux())
 
 builder.Services.AddMemoryCache();
 builder.Services.AddHostedService<PiGrow.Services.MqttClientService>();
+builder.Services.AddHostedService<PiGrow.Services.ArduinoDataService>();
 builder.Services.AddHostedService<PiGrow.Services.ConditionCheckerService>();
 //builder.Services.AddHostedService<PiGrow.Services.ArduinoDataService>();
 
