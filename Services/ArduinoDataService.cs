@@ -1,4 +1,4 @@
-﻿using System.IO.Ports;
+using System.IO.Ports;
 
 namespace PiGrow.Services
 {
@@ -56,7 +56,7 @@ namespace PiGrow.Services
                 }
                 catch (TimeoutException)
                 {
-                    _logger.LogInformation("Serial read timeout."); 
+                    _logger.LogInformation("Serial read timeout.");
                 }
                 catch (Exception ex)
                 {

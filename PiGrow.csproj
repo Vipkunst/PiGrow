@@ -7,6 +7,13 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Remove="PiGrow/**" />
+    <Content Remove="PiGrow/**" />
+    <EmbeddedResource Remove="PiGrow/**" />
+    <None Remove="PiGrow/**" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="MQTTnet" Version="5.0.1.1416" />
     <PackageReference Include="System.Device.Gpio" Version="4.1.0" />
     <PackageReference Include="System.IO.Ports" Version="10.0.1" />
