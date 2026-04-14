@@ -47,7 +47,7 @@ namespace PiGrow.Services
 
                     if (int.TryParse(line, out int value))
                     {
-                        _logger.LogInformation($"Light: {value}");
+                        // light value — no logging
                     }
                     else
                     {
