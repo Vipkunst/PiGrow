@@ -111,24 +111,24 @@ namespace PiGrow.Services
                 _logger.LogInformation("Humidity {Value:F1}% is below min {Min}% → pump ON", humidity, _humidityThreshold.min);
 
                 // --- Temperature guard: don't water if it's too cold or too hot ---
-                if (TryGetSensorValue("sensor/bme680/temperature", out double temperature))
-                {
-                    if (temperature < _temperatureThreshold.min || temperature > _temperatureThreshold.max)
-                    {
-                        _logger.LogWarning("Temperature {Value:F1}°C out of safe range [{Min},{Max}] — skipping watering", temperature, _temperatureThreshold.min, _temperatureThreshold.max);
-                        return false;
-                    }
-                }
+                // if (TryGetSensorValue("sensor/bme680/temperature", out double temperature))
+                // {
+                //     if (temperature < _temperatureThreshold.min || temperature > _temperatureThreshold.max)
+                //     {
+                //         _logger.LogWarning("Temperature {Value:F1}°C out of safe range [{Min},{Max}] — skipping watering", temperature, _temperatureThreshold.min, _temperatureThreshold.max);
+                //         return false;
+                //     }
+                // }
 
                 // --- Gas guard: don't water in a high-gas environment ---
-                if (TryGetSensorValue("sensor/bme680/gas", out double gas))
-                {
-                    if (gas > _gasThreshold.max)
-                    {
-                        _logger.LogWarning("Gas {Value:F1} exceeds max {Max} — skipping watering", gas, _gasThreshold.max);
-                        return false;
-                    }
-                }
+                // if (TryGetSensorValue("sensor/bme680/gas", out double gas))
+                // {
+                //     if (gas > _gasThreshold.max)
+                //     {
+                //         _logger.LogWarning("Gas {Value:F1} exceeds max {Max} — skipping watering", gas, _gasThreshold.max);
+                //         return false;
+                //     }
+                // }
 
                 return true;
             }
