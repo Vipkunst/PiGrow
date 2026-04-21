@@ -106,6 +106,7 @@ namespace PiGrow.Services
                 _logger.LogWarning("Soil humidity data unavailable — keeping pump OFF");
                 return false;
             }
+            _logger.LogInformation("Soil Humidity value: "+ soilHumidity);
 
             if (soilHumidity < _soilHumidityThreshold.Min)
             {
