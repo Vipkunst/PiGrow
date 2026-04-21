@@ -1,10 +1,14 @@
-﻿using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Caching.Memory;
 using MQTTnet;
 using System.Buffers;
 using System.Text;
 
 namespace PiGrow.Services
 {
+    /// <summary>
+    /// Background service that connects to the MQTT broker, subscribes to sensor topics,
+    /// and caches each incoming message so other services can read the latest values.
+    /// </summary>
     public class MqttClientService : BackgroundService
     {
         private readonly IMemoryCache _cache;
@@ -17,20 +21,25 @@ namespace PiGrow.Services
         {
             _cache = cache;
             _configuration = configuration;
-            var factory = new MqttClientFactory();
-            _mqttClient = factory.CreateMqttClient();
             _logger = logger;
 
+            var factory = new MqttClientFactory();
+            _mqttClient = factory.CreateMqttClient();
+
             _options = new MqttClientOptionsBuilder()
-                .WithTcpServer(_configuration["Mqtt:Host"], int.Parse(_configuration["Mqtt:Port"]))
+                .WithTcpServer(_configuration["Mqtt:Host"], int.Parse(_configuration["Mqtt:Port"]!))
                 .WithClientId($"WebApiClient-{Environment.MachineName}-{Guid.NewGuid()}")
                 .WithCredentials(_configuration["Mqtt:Username"], _configuration["Mqtt:Password"])
                 .Build();
 
-            // Setup message handler
             _mqttClient.ApplicationMessageReceivedAsync += OnMessageReceived;
         }
 
+        /// <summary>
+        /// Handles an incoming MQTT message: decodes the payload, wraps it in a
+        /// <see cref="Classes.SensorData"/> object, and stores it in the cache keyed by topic.
+        /// Cache entries expire after 10 minutes so stale sensor data is not acted upon indefinitely.
+        /// </summary>
         private async Task OnMessageReceived(MqttApplicationMessageReceivedEventArgs e)
         {
             try
@@ -43,17 +52,18 @@ namespace PiGrow.Services
                     Timestamp = DateTime.UtcNow
                 };
 
-                // Cache the latest data
                 _cache.Set(data.Topic, data, TimeSpan.FromMinutes(10));
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "MQTT message handling failed");
             }
-
-            return;
         }
 
+        /// <summary>
+        /// Connects to the broker and subscribes to all sensor topics.
+        /// The service stays alive until the host requests cancellation.
+        /// </summary>
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             await _mqttClient.ConnectAsync(_options, stoppingToken);
@@ -68,6 +78,9 @@ namespace PiGrow.Services
             await _mqttClient.SubscribeAsync(subscribeOptions, stoppingToken);
         }
 
+        /// <summary>
+        /// Disconnects from the broker cleanly before the service is destroyed.
+        /// </summary>
         public override async Task StopAsync(CancellationToken cancellationToken)
         {
             if (_mqttClient.IsConnected)

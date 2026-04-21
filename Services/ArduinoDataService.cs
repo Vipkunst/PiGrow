@@ -2,6 +2,10 @@ using System.IO.Ports;
 
 namespace PiGrow.Services
 {
+    /// <summary>
+    /// Background service that reads data from an Arduino over a serial (USB) connection.
+    /// Currently reads light sensor values; extend the parsing logic for additional sensors.
+    /// </summary>
     public class ArduinoDataService : BackgroundService
     {
         private readonly string _portName = "/dev/ttyACM0";
@@ -15,6 +19,9 @@ namespace PiGrow.Services
             _logger = logger;
         }
 
+        /// <summary>
+        /// Opens the serial port and reads lines in a loop until cancellation is requested.
+        /// </summary>
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             _serialPort = new SerialPort(_portName, _baudRate)
@@ -36,7 +43,6 @@ namespace PiGrow.Services
                 return;
             }
 
-            // Main loop
             while (!stoppingToken.IsCancellationRequested)
             {
                 try
@@ -47,7 +53,7 @@ namespace PiGrow.Services
 
                     if (int.TryParse(line, out int value))
                     {
-                        // light value — no logging
+                        // Light sensor value received — no action taken yet.
                     }
                     else
                     {
@@ -56,6 +62,7 @@ namespace PiGrow.Services
                 }
                 catch (TimeoutException)
                 {
+                    // ReadTimeout is expected when there is no data; not an error.
                     _logger.LogInformation("Serial read timeout.");
                 }
                 catch (Exception ex)
@@ -63,17 +70,15 @@ namespace PiGrow.Services
                     _logger.LogError($"Serial error: {ex.Message}");
                 }
 
-                // Yield to avoid tight CPU loop
+                // Small delay to avoid a tight CPU loop between reads.
                 await Task.Delay(10, stoppingToken);
             }
 
-            // Cleanup on shutdown
             if (_serialPort.IsOpen)
-            {
                 _serialPort.Close();
-            }
         }
 
+        /// <inheritdoc/>
         public override void Dispose()
         {
             _serialPort?.Dispose();
