@@ -46,8 +46,8 @@ namespace PiGrow.Services
                 // Cache the latest data
                 _cache.Set(data.Topic, data, TimeSpan.FromMinutes(10));
 
-                if (data.Topic == "sensor/bme680/humidity")
-                    _logger.LogInformation("Humidity: {Value}", payload);
+                if (data.Topic == "sensor/bodenfeuchte/prozent")
+                    _logger.LogInformation("Soil Humidity: {Value}", payload);
             }
             catch (Exception ex)
             {
