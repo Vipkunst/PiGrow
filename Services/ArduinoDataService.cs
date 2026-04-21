@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Caching.Memory;
 using System.IO.Ports;
 
 namespace PiGrow.Services
@@ -8,14 +9,18 @@ namespace PiGrow.Services
     /// </summary>
     public class ArduinoDataService : BackgroundService
     {
+        public const string LightTopic = "sensor/arduino/light";
+
         private readonly string _portName = "/dev/ttyACM0";
         private readonly int _baudRate = 9600;
 
         private SerialPort? _serialPort;
+        private readonly IMemoryCache _cache;
         private readonly ILogger<ArduinoDataService> _logger;
 
-        public ArduinoDataService(ILogger<ArduinoDataService> logger)
+        public ArduinoDataService(IMemoryCache cache, ILogger<ArduinoDataService> logger)
         {
+            _cache = cache;
             _logger = logger;
         }
 
@@ -53,7 +58,12 @@ namespace PiGrow.Services
 
                     if (int.TryParse(line, out int value))
                     {
-                        // Light sensor value received — no action taken yet.
+                        _cache.Set(LightTopic, new Classes.SensorData
+                        {
+                            Topic     = LightTopic,
+                            Message   = value.ToString(),
+                            Timestamp = DateTime.UtcNow
+                        }, TimeSpan.FromMinutes(10));
                     }
                     else
                     {

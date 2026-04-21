@@ -13,6 +13,7 @@ namespace PiGrow.Services
         private const string HumidityTopic     = "sensor/bme680/humidity";
         private const string TemperatureTopic  = "sensor/bme680/temperature";
         private const string GasTopic          = "sensor/bme680/gas";
+        private const string LightTopic        = ArduinoDataService.LightTopic;
 
         private readonly IMemoryCache _data;
         private readonly ILogger<ConditionCheckerService> _logger;
@@ -20,6 +21,8 @@ namespace PiGrow.Services
 
         private readonly bool _runStartupTest;
         private readonly TimeSpan _testPulseDuration;
+        private readonly bool _mqttLogging;
+        private readonly bool _arduinoLogging;
 
         // Thresholds loaded from appsettings.json — fallback defaults used if the section is missing.
         private readonly Classes.Threshold _soilHumidityThreshold;
@@ -36,6 +39,9 @@ namespace PiGrow.Services
 
             _runStartupTest = config.GetValue("ConditionChecker:RunStartupTest", true);
             _testPulseDuration = TimeSpan.FromSeconds(config.GetValue("ConditionChecker:TestPulseSeconds", 10));
+
+            _mqttLogging = config.GetSection("Debug:Logging:LogMqttValues").Get<bool>();
+            _arduinoLogging = config.GetSection("Debug:Logging:LogArduinoValues").Get<bool>();
 
             _soilHumidityThreshold = config.GetSection("Conditions:SoilHumidityThreshold").Get<Classes.Threshold>() ?? new Classes.Threshold { Min = 40.0, Max = 80.0 };
             _humidityThreshold     = config.GetSection("Conditions:HumidityThreshold").Get<Classes.Threshold>()     ?? new Classes.Threshold { Min = 40.0, Max = 80.0 };
@@ -66,6 +72,17 @@ namespace PiGrow.Services
             {
                 try
                 {
+                    if (_mqttLogging)
+                    {
+                        LogSensorValue("SoilHumidity", SoilHumidityTopic);
+                        LogSensorValue("Humidity",     HumidityTopic);
+                        LogSensorValue("Temperature",  TemperatureTopic);
+                        LogSensorValue("Gas",          GasTopic);
+                    }
+
+                    if (_arduinoLogging)
+                        LogSensorValue("Light", LightTopic);
+
                     bool shouldWater = EvaluateWateringCondition();
 
                     // Only toggle the relay when the desired state differs from the current state.
@@ -147,6 +164,14 @@ namespace PiGrow.Services
                 _logger.LogInformation("Soil humidity {Value:F1}% at or above max {Max}% → pump OFF", soilHumidity, _soilHumidityThreshold.Max);
 
             return false;
+        }
+
+        private void LogSensorValue(string name, string topic)
+        {
+            if (TryGetSensorValue(topic, out double value))
+                _logger.LogInformation("[Sensor] {Name}: {Value}", name, value);
+            else
+                _logger.LogWarning("[Sensor] {Name} ({Topic}): no data", name, topic);
         }
 
         /// <summary>
