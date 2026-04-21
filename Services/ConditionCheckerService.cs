@@ -72,16 +72,22 @@ namespace PiGrow.Services
             {
                 try
                 {
-                    if (_mqttLogging)
+                    if (_mqttLogging || _arduinoLogging)
                     {
-                        LogSensorValue("SoilHumidity", SoilHumidityTopic);
-                        LogSensorValue("Humidity",     HumidityTopic);
-                        LogSensorValue("Temperature",  TemperatureTopic);
-                        LogSensorValue("Gas",          GasTopic);
-                    }
+                        var parts = new List<string>();
+                        if (_mqttLogging)
+                        {
+                            parts.Add(FormatSensor("Soil",  SoilHumidityTopic));
+                            parts.Add(FormatSensor("Hum",   HumidityTopic));
+                            parts.Add(FormatSensor("Temp",  TemperatureTopic));
+                            parts.Add(FormatSensor("Gas",   GasTopic));
+                        }
+                        if (_arduinoLogging)
+                            parts.Add(FormatSensor("Light", LightTopic));
 
-                    if (_arduinoLogging)
-                        LogSensorValue("Light", LightTopic);
+                        var line = string.Join(" | ", parts);
+                        Console.Write("\r" + line.PadRight(Console.WindowWidth - 1));
+                    }
 
                     bool shouldWater = EvaluateWateringCondition();
 
@@ -166,13 +172,8 @@ namespace PiGrow.Services
             return false;
         }
 
-        private void LogSensorValue(string name, string topic)
-        {
-            if (TryGetSensorValue(topic, out double value))
-                _logger.LogInformation("[Sensor] {Name}: {Value}", name, value);
-            else
-                _logger.LogWarning("[Sensor] {Name} ({Topic}): no data", name, topic);
-        }
+        private string FormatSensor(string name, string topic) =>
+            TryGetSensorValue(topic, out double value) ? $"{name}: {value}" : $"{name}: ---";
 
         /// <summary>
         /// Retrieves a sensor reading from the cache and parses it as a double.
