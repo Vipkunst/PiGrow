@@ -123,10 +123,20 @@ namespace PiGrow.Services
         {
             value = 0;
             if (!_data.TryGetValue(topic, out var raw) || raw is not Classes.SensorData sensorData)
+            {
+                _logger.LogDebug("Cache miss for topic {Topic}", topic);
                 return false;
+            }
 
-            return double.TryParse(sensorData.Message, System.Globalization.NumberStyles.Float,
-                                   System.Globalization.CultureInfo.InvariantCulture, out value);
+            var message = sensorData.Message.TrimEnd('%').Trim();
+            if (!double.TryParse(message, System.Globalization.NumberStyles.Float,
+                                 System.Globalization.CultureInfo.InvariantCulture, out value))
+            {
+                _logger.LogDebug("Failed to parse value '{Message}' for topic {Topic}", sensorData.Message, topic);
+                return false;
+            }
+
+            return true;
         }
     }
 }
