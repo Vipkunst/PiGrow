@@ -65,6 +65,7 @@ namespace PiGrow.Services
                 .WithTopicFilter("sensor/bme680/gas")
                 .WithTopicFilter("sensor/bme680/humidity")
                 .WithTopicFilter("sensor/bme680/temperature")
+                .WithTopicFilter("sensor/bodenfeuchte/prozent")
                 .Build();
 
             await _mqttClient.SubscribeAsync(subscribeOptions, stoppingToken);
