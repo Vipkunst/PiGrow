@@ -12,10 +12,10 @@ namespace PiGrow.Services
     {
         // MQTT topic constants — must match the topics subscribed to in MqttClientService.
         private const string SoilHumidityTopic = "sensor/bodenfeuchte/prozent";
-        private const string HumidityTopic     = "sensor/bme680/humidity";
-        private const string TemperatureTopic  = "sensor/bme680/temperature";
-        private const string GasTopic          = "sensor/bme680/gas";
-        private const string LightTopic        = ArduinoDataService.LightTopic;
+        private const string HumidityTopic = "sensor/bme680/humidity";
+        private const string TemperatureTopic = "sensor/bme680/temperature";
+        private const string GasTopic = "sensor/bme680/gas";
+        private const string LightTopic = ArduinoDataService.LightTopic;
 
         private readonly IMemoryCache _data;
         private readonly ILogger<ConditionCheckerService> _logger;
@@ -33,30 +33,39 @@ namespace PiGrow.Services
         private readonly Threshold _gasThreshold;
         private readonly Threshold _lightThreshold;
 
+        // Minimum time between the start of one watering cycle and the start of the next.
+        private readonly TimeSpan _timeBetweenWatering;
+        private DateTime _lastTimeWatered;
+
         public ConditionCheckerService(IMemoryCache data, ILogger<ConditionCheckerService> logger, IPiRelayController relayService, IConfiguration config)
         {
             _data = data;
             _logger = logger;
             _relayController = relayService;
 
-            _runStartupTest    = config.GetValue("ConditionChecker:RunStartupTest", true);
+            _runStartupTest = config.GetValue("ConditionChecker:RunStartupTest", true);
             _testPulseDuration = TimeSpan.FromSeconds(config.GetValue("ConditionChecker:TestPulseSeconds", 10));
-            _mqttLogging       = config.GetSection("Debug:Logging:LogMqttValues").Get<bool>();
-            _arduinoLogging    = config.GetSection("Debug:Logging:LogArduinoValues").Get<bool>();
+            _mqttLogging = config.GetSection("Debug:Logging:LogMqttValues").Get<bool>();
+            _arduinoLogging = config.GetSection("Debug:Logging:LogArduinoValues").Get<bool>();
 
-            _soilHumidityThreshold = LoadThreshold(config, "SoilHumidityThreshold", 40.0,  80.0);
-            _humidityThreshold     = LoadThreshold(config, "HumidityThreshold",     40.0,  80.0);
-            _temperatureThreshold  = LoadThreshold(config, "TemperatureThreshold",  15.0,  30.0);
-            _gasThreshold          = LoadThreshold(config, "GasThreshold",           0.0, 300.0);
-            _lightThreshold        = LoadThreshold(config, "LightThreshold",        20.0, 100.0);
+            _soilHumidityThreshold = LoadThreshold(config, "SoilHumidityThreshold", 40.0, 80.0);
+            _humidityThreshold = LoadThreshold(config, "HumidityThreshold", 40.0, 80.0);
+            _temperatureThreshold = LoadThreshold(config, "TemperatureThreshold", 15.0, 30.0);
+            _gasThreshold = LoadThreshold(config, "GasThreshold", 0.0, 300.0);
+            _lightThreshold = LoadThreshold(config, "LightThreshold", 20.0, 100.0);
+
+            _timeBetweenWatering = TimeSpan.FromSeconds(config.GetValue("TimeThresholds:TimeBetweenWateringSeconds", 3600));
+            // Allow watering to start immediately on first eligible reading after startup.
+            _lastTimeWatered = DateTime.UtcNow - _timeBetweenWatering;
 
             _logger.LogInformation(
-                "Thresholds loaded — SoilHumidity: {SMin}-{SMax}, Humidity: {HMin}-{HMax}, Temperature: {TMin}-{TMax}, Gas: {GMin}-{GMax}, Light: {LMin}-{LMax}",
+                "Thresholds loaded — SoilHumidity: {SMin}-{SMax}, Humidity: {HMin}-{HMax}, Temperature: {TMin}-{TMax}, Gas: {GMin}-{GMax}, Light: {LMin}-{LMax}, Cooldown: {Cooldown}",
                 _soilHumidityThreshold.Min, _soilHumidityThreshold.Max,
                 _humidityThreshold.Min, _humidityThreshold.Max,
                 _temperatureThreshold.Min, _temperatureThreshold.Max,
                 _gasThreshold.Min, _gasThreshold.Max,
-                _lightThreshold.Min, _lightThreshold.Max);
+                _lightThreshold.Min, _lightThreshold.Max,
+                _timeBetweenWatering);
         }
 
         private static Threshold LoadThreshold(IConfiguration config, string key, double defaultMin, double defaultMax) =>
@@ -78,7 +87,10 @@ namespace PiGrow.Services
                 {
                     WriteSensorStatusLine();
 
-                    bool shouldWater = EvaluateWateringCondition();
+                    bool shouldWater = EvaluateCondition(
+                        SoilHumidityTopic, _soilHumidityThreshold,
+                        _relayController.IsOn,
+                        _timeBetweenWatering, ref _lastTimeWatered);
 
                     // Only toggle the relay when the desired state differs from the current state.
                     if (shouldWater != _relayController.IsOn)
@@ -111,9 +123,9 @@ namespace PiGrow.Services
             if (_mqttLogging)
             {
                 parts.Add(FormatSensor("Soil", SoilHumidityTopic));
-                parts.Add(FormatSensor("Hum",  HumidityTopic));
+                parts.Add(FormatSensor("Hum", HumidityTopic));
                 parts.Add(FormatSensor("Temp", TemperatureTopic));
-                parts.Add(FormatSensor("Gas",  GasTopic));
+                parts.Add(FormatSensor("Gas", GasTopic));
             }
             if (_arduinoLogging)
                 parts.Add(FormatSensor("Light", LightTopic));
@@ -154,33 +166,101 @@ namespace PiGrow.Services
         }
 
         /// <summary>
-        /// Determines whether the pump should be ON based on the latest soil humidity reading.
-        /// Primary trigger: soil humidity below minimum threshold.
-        /// Guard conditions (temperature, gas) can be wired in here when needed.
+        /// Generic predicate: returns <c>true</c> when the latest reading on <paramref name="topic"/>
+        /// is below <paramref name="threshold"/>.Min. Returns <c>false</c> if the value is missing,
+        /// unparseable, or at/above Min.
         /// </summary>
-        /// <returns><c>true</c> if the pump should be ON, <c>false</c> otherwise.</returns>
-        private bool EvaluateWateringCondition()
+        private bool EvaluateCondition(string topic, Threshold threshold)
         {
-            if (!TryGetSensorValue(SoilHumidityTopic, out double soilHumidity))
+            if (!TryGetSensorValue(topic, out double value))
             {
-                _logger.LogWarning("Soil humidity data unavailable — keeping pump OFF");
+                _logger.LogWarning("Data for topic {Topic} unavailable — condition not evaluated", topic);
+                return false;
+            }
+            if (value < threshold.Min)
+            {
+                _logger.LogInformation("Topic {Topic}: value {Value:F1} below min {Min}", topic, value, threshold.Min);
+                return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Generic predicate with cooldown: returns <c>true</c> only when the value is below Min
+        /// AND <paramref name="timeBetween"/> has elapsed since <paramref name="lastTime"/>.
+        /// On success, <paramref name="lastTime"/> is advanced to <see cref="DateTime.UtcNow"/>.
+        /// </summary>
+        /// <param name="lastTime">
+        /// Caller-owned cooldown timestamp; passed by ref so the update persists across calls.
+        /// </param>
+        private bool EvaluateCondition(string topic, Threshold threshold, TimeSpan timeBetween, ref DateTime lastTime)
+        {
+            if (!EvaluateCondition(topic, threshold))
+                return false;
+
+            var elapsed = DateTime.UtcNow - lastTime;
+            if (elapsed <= timeBetween)
+            {
+                _logger.LogInformation("Topic {Topic}: cooldown not elapsed ({Elapsed} ≤ {Cooldown}) — suppressed", topic, elapsed, timeBetween);
                 return false;
             }
 
-            _logger.LogInformation("Soil humidity value: {Value:F1}%", soilHumidity);
+            lastTime = DateTime.UtcNow;
+            return true;
+        }
 
-            if (soilHumidity < _soilHumidityThreshold.Min)
+        /// <summary>
+        /// Generic predicate with Min/Max hysteresis: when inactive, becomes active if value &lt; Min;
+        /// when active, stays active until value &gt;= Max.
+        /// </summary>
+        private bool EvaluateCondition(string topic, Threshold threshold, bool currentlyActive)
+        {
+            if (!TryGetSensorValue(topic, out double value))
             {
-                _logger.LogInformation("Soil humidity {Value:F1}% below min {Min}% → pump ON", soilHumidity, _soilHumidityThreshold.Min);
+                _logger.LogWarning("Data for topic {Topic} unavailable — condition not evaluated", topic);
+                return false;
+            }
+
+            if (currentlyActive)
+            {
+                if (value >= threshold.Max)
+                {
+                    _logger.LogInformation("Topic {Topic}: value {Value:F1} at or above max {Max} — deactivating", topic, value, threshold.Max);
+                    return false;
+                }
                 return true;
             }
 
-            if (soilHumidity >= _soilHumidityThreshold.Max)
-                _logger.LogInformation("Soil humidity {Value:F1}% at or above max {Max}% → pump OFF", soilHumidity, _soilHumidityThreshold.Max);
-            else
-                _logger.LogInformation("Soil humidity {Value:F1}% within range [{Min}%, {Max}%) → pump OFF", soilHumidity, _soilHumidityThreshold.Min, _soilHumidityThreshold.Max);
-
+            if (value < threshold.Min)
+            {
+                _logger.LogInformation("Topic {Topic}: value {Value:F1} below min {Min} — activating", topic, value, threshold.Min);
+                return true;
+            }
             return false;
+        }
+
+        /// <summary>
+        /// Generic predicate with Min/Max hysteresis and a cooldown that gates only the
+        /// inactive→active edge. Once active, the cycle continues until value &gt;= Max
+        /// regardless of cooldown. <paramref name="lastTime"/> is advanced when a new cycle starts.
+        /// </summary>
+        private bool EvaluateCondition(string topic, Threshold threshold, bool currentlyActive, TimeSpan timeBetween, ref DateTime lastTime)
+        {
+            if (currentlyActive)
+                return EvaluateCondition(topic, threshold, currentlyActive: true);
+
+            if (!EvaluateCondition(topic, threshold))
+                return false;
+
+            var elapsed = DateTime.UtcNow - lastTime;
+            if (elapsed <= timeBetween)
+            {
+                _logger.LogInformation("Topic {Topic}: cooldown not elapsed ({Elapsed} ≤ {Cooldown}) — suppressed", topic, elapsed, timeBetween);
+                return false;
+            }
+
+            lastTime = DateTime.UtcNow;
+            return true;
         }
 
         private string FormatSensor(string name, string topic) =>
