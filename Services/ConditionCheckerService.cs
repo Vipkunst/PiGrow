@@ -37,11 +37,18 @@ namespace PiGrow.Services
         private readonly TimeSpan _timeBetweenWatering;
         private DateTime _lastTimeWatered;
 
-        public ConditionCheckerService(IMemoryCache data, ILogger<ConditionCheckerService> logger, IPiRelayController relayService, IConfiguration config)
+        // Cooldown between low-light alerts so a dim afternoon doesn't spam the phone.
+        private readonly TimeSpan _lightAlertCooldown;
+        private DateTime _lastLightAlert;
+
+        private readonly NtfyService _ntfyService;
+
+        public ConditionCheckerService(IMemoryCache data, ILogger<ConditionCheckerService> logger, IPiRelayController relayService, IConfiguration config, NtfyService ntfyService)
         {
             _data = data;
             _logger = logger;
             _relayController = relayService;
+            _ntfyService = ntfyService;
 
             _runStartupTest = config.GetValue("ConditionChecker:RunStartupTest", true);
             _testPulseDuration = TimeSpan.FromSeconds(config.GetValue("ConditionChecker:TestPulseSeconds", 10));
@@ -57,6 +64,10 @@ namespace PiGrow.Services
             _timeBetweenWatering = TimeSpan.FromSeconds(config.GetValue("TimeThresholds:TimeBetweenWateringSeconds", 3600));
             // Allow watering to start immediately on first eligible reading after startup.
             _lastTimeWatered = DateTime.UtcNow - _timeBetweenWatering;
+
+            _lightAlertCooldown = TimeSpan.FromSeconds(config.GetValue("TimeThresholds:LightAlertCooldownSeconds", 21600));
+            // Suppress alert on startup; first alert can fire after one full cooldown of running.
+            _lastLightAlert = DateTime.UtcNow;
 
             _logger.LogInformation(
                 "Thresholds loaded — SoilHumidity: {SMin}-{SMax}, Humidity: {HMin}-{HMax}, Temperature: {TMin}-{TMax}, Gas: {GMin}-{GMax}, Light: {LMin}-{LMax}, Cooldown: {Cooldown}",
@@ -95,6 +106,21 @@ namespace PiGrow.Services
                     // Only toggle the relay when the desired state differs from the current state.
                     if (shouldWater != _relayController.IsOn)
                         await _relayController.SetStateAsync(shouldWater, stoppingToken);
+
+                    if (EvaluateCondition(LightTopic, _lightThreshold, _lightAlertCooldown, ref _lastLightAlert))
+                    {
+                        try
+                        {
+                            await _ntfyService.NotifyAsync(
+                                "PiGrow: plant needs light",
+                                $"Light reading is below the configured minimum ({_lightThreshold.Min}). Consider moving the plant or turning on a grow light.",
+                                stoppingToken);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Light alert notification failed");
+                        }
+                    }
 
                     // Task.Delay is inside the try so cancellation is caught and exits cleanly,
                     // allowing the final SetStateAsync(false) below to always run.

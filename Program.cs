@@ -1,3 +1,4 @@
+using PiGrow.Services;
 using System.Device.Gpio;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -12,7 +13,9 @@ builder.Services.AddMemoryCache();
 builder.Services.AddHostedService<PiGrow.Services.MqttClientService>();
 builder.Services.AddHostedService<PiGrow.Services.ArduinoDataService>();
 builder.Services.AddHostedService<PiGrow.Services.ConditionCheckerService>();
-//builder.Services.AddHostedService<PiGrow.Services.ArduinoDataService>();
+builder.Services.AddHostedService<PiGrow.Services.ArduinoDataService>();
+
+builder.Services.AddHttpClient<NtfyService>();
 
 var app = builder.Build();
 
