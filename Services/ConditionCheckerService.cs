@@ -1,4 +1,6 @@
 using Microsoft.Extensions.Caching.Memory;
+using SensorData = PiGrow.Classes.SensorData;
+using Threshold = PiGrow.Classes.Threshold;
 
 namespace PiGrow.Services
 {
@@ -25,11 +27,11 @@ namespace PiGrow.Services
         private readonly bool _arduinoLogging;
 
         // Thresholds loaded from appsettings.json — fallback defaults used if the section is missing.
-        private readonly Classes.Threshold _soilHumidityThreshold;
-        private readonly Classes.Threshold _humidityThreshold;
-        private readonly Classes.Threshold _temperatureThreshold;
-        private readonly Classes.Threshold _gasThreshold;
-        private readonly Classes.Threshold _lightThreshold;
+        private readonly Threshold _soilHumidityThreshold;
+        private readonly Threshold _humidityThreshold;
+        private readonly Threshold _temperatureThreshold;
+        private readonly Threshold _gasThreshold;
+        private readonly Threshold _lightThreshold;
 
         public ConditionCheckerService(IMemoryCache data, ILogger<ConditionCheckerService> logger, IPiRelayController relayService, IConfiguration config)
         {
@@ -37,17 +39,16 @@ namespace PiGrow.Services
             _logger = logger;
             _relayController = relayService;
 
-            _runStartupTest = config.GetValue("ConditionChecker:RunStartupTest", true);
+            _runStartupTest    = config.GetValue("ConditionChecker:RunStartupTest", true);
             _testPulseDuration = TimeSpan.FromSeconds(config.GetValue("ConditionChecker:TestPulseSeconds", 10));
+            _mqttLogging       = config.GetSection("Debug:Logging:LogMqttValues").Get<bool>();
+            _arduinoLogging    = config.GetSection("Debug:Logging:LogArduinoValues").Get<bool>();
 
-            _mqttLogging = config.GetSection("Debug:Logging:LogMqttValues").Get<bool>();
-            _arduinoLogging = config.GetSection("Debug:Logging:LogArduinoValues").Get<bool>();
-
-            _soilHumidityThreshold = config.GetSection("Conditions:SoilHumidityThreshold").Get<Classes.Threshold>() ?? new Classes.Threshold { Min = 40.0, Max = 80.0 };
-            _humidityThreshold     = config.GetSection("Conditions:HumidityThreshold").Get<Classes.Threshold>()     ?? new Classes.Threshold { Min = 40.0, Max = 80.0 };
-            _temperatureThreshold  = config.GetSection("Conditions:TemperatureThreshold").Get<Classes.Threshold>()  ?? new Classes.Threshold { Min = 15.0, Max = 30.0 };
-            _gasThreshold          = config.GetSection("Conditions:GasThreshold").Get<Classes.Threshold>()          ?? new Classes.Threshold { Min =  0.0, Max = 300.0 };
-            _lightThreshold        = config.GetSection("Conditions:LightThreshold").Get<Classes.Threshold>()        ?? new Classes.Threshold { Min = 20.0, Max = 100.0 };
+            _soilHumidityThreshold = LoadThreshold(config, "SoilHumidityThreshold", 40.0,  80.0);
+            _humidityThreshold     = LoadThreshold(config, "HumidityThreshold",     40.0,  80.0);
+            _temperatureThreshold  = LoadThreshold(config, "TemperatureThreshold",  15.0,  30.0);
+            _gasThreshold          = LoadThreshold(config, "GasThreshold",           0.0, 300.0);
+            _lightThreshold        = LoadThreshold(config, "LightThreshold",        20.0, 100.0);
 
             _logger.LogInformation(
                 "Thresholds loaded — SoilHumidity: {SMin}-{SMax}, Humidity: {HMin}-{HMax}, Temperature: {TMin}-{TMax}, Gas: {GMin}-{GMax}, Light: {LMin}-{LMax}",
@@ -58,6 +59,9 @@ namespace PiGrow.Services
                 _lightThreshold.Min, _lightThreshold.Max);
         }
 
+        private static Threshold LoadThreshold(IConfiguration config, string key, double defaultMin, double defaultMax) =>
+            config.GetSection($"Conditions:{key}").Get<Threshold>() ?? new Threshold { Min = defaultMin, Max = defaultMax };
+
         /// <summary>
         /// Entry point called by the BackgroundService host. Runs the optional startup
         /// test then enters the main evaluation loop.
@@ -65,29 +69,14 @@ namespace PiGrow.Services
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             // Optional one-shot pulse to verify pump wiring before entering the main loop.
-            if (_runStartupTest && !await RunStartupTestAsync(stoppingToken))
+            if (_runStartupTest && !await TryRunStartupTestAsync(stoppingToken))
                 return;
 
             while (!stoppingToken.IsCancellationRequested)
             {
                 try
                 {
-                    if (_mqttLogging || _arduinoLogging)
-                    {
-                        var parts = new List<string>();
-                        if (_mqttLogging)
-                        {
-                            parts.Add(FormatSensor("Soil",  SoilHumidityTopic));
-                            parts.Add(FormatSensor("Hum",   HumidityTopic));
-                            parts.Add(FormatSensor("Temp",  TemperatureTopic));
-                            parts.Add(FormatSensor("Gas",   GasTopic));
-                        }
-                        if (_arduinoLogging)
-                            parts.Add(FormatSensor("Light", LightTopic));
-
-                        var line = string.Join(" | ", parts);
-                        Console.Write("\r" + line.PadRight(Console.WindowWidth - 1));
-                    }
+                    WriteSensorStatusLine();
 
                     bool shouldWater = EvaluateWateringCondition();
 
@@ -113,6 +102,26 @@ namespace PiGrow.Services
             try { await _relayController.SetStateAsync(false); } catch { }
         }
 
+        private void WriteSensorStatusLine()
+        {
+            if (!_mqttLogging && !_arduinoLogging)
+                return;
+
+            var parts = new List<string>();
+            if (_mqttLogging)
+            {
+                parts.Add(FormatSensor("Soil", SoilHumidityTopic));
+                parts.Add(FormatSensor("Hum",  HumidityTopic));
+                parts.Add(FormatSensor("Temp", TemperatureTopic));
+                parts.Add(FormatSensor("Gas",  GasTopic));
+            }
+            if (_arduinoLogging)
+                parts.Add(FormatSensor("Light", LightTopic));
+
+            var line = string.Join(" | ", parts);
+            Console.Write("\r" + line.PadRight(Console.WindowWidth - 1));
+        }
+
         /// <summary>
         /// Turns the pump ON for <see cref="_testPulseDuration"/> then OFF, to verify wiring.
         /// </summary>
@@ -120,7 +129,7 @@ namespace PiGrow.Services
         /// <c>true</c> if the test completed normally or failed with a non-cancellation error;
         /// <c>false</c> if the host is shutting down mid-test (caller should return immediately).
         /// </returns>
-        private async Task<bool> RunStartupTestAsync(CancellationToken stoppingToken)
+        private async Task<bool> TryRunStartupTestAsync(CancellationToken stoppingToken)
         {
             try
             {
@@ -168,6 +177,8 @@ namespace PiGrow.Services
 
             if (soilHumidity >= _soilHumidityThreshold.Max)
                 _logger.LogInformation("Soil humidity {Value:F1}% at or above max {Max}% → pump OFF", soilHumidity, _soilHumidityThreshold.Max);
+            else
+                _logger.LogInformation("Soil humidity {Value:F1}% within range [{Min}%, {Max}%) → pump OFF", soilHumidity, _soilHumidityThreshold.Min, _soilHumidityThreshold.Max);
 
             return false;
         }
@@ -185,7 +196,7 @@ namespace PiGrow.Services
         private bool TryGetSensorValue(string topic, out double value)
         {
             value = 0;
-            if (!_data.TryGetValue(topic, out var raw) || raw is not Classes.SensorData sensorData)
+            if (!_data.TryGetValue(topic, out var raw) || raw is not SensorData sensorData)
             {
                 _logger.LogDebug("Cache miss for topic {Topic}", topic);
                 return false;
