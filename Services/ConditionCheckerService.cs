@@ -66,8 +66,7 @@ namespace PiGrow.Services
             _lastTimeWatered = DateTime.UtcNow - _timeBetweenWatering;
 
             _lightAlertCooldown = TimeSpan.FromSeconds(config.GetValue("TimeThresholds:LightAlertCooldownSeconds", 21600));
-            // Suppress alert on startup; first alert can fire after one full cooldown of running.
-            _lastLightAlert = DateTime.UtcNow;
+            _lastLightAlert = DateTime.UtcNow - _lightAlertCooldown;
 
             _logger.LogInformation(
                 "Thresholds loaded — SoilHumidity: {SMin}-{SMax}, Humidity: {HMin}-{HMax}, Temperature: {TMin}-{TMax}, Gas: {GMin}-{GMax}, Light: {LMin}-{LMax}, Cooldown: {Cooldown}",
