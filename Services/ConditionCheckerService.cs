@@ -71,7 +71,7 @@ namespace PiGrow.Services
             _lastLightAlert = DateTime.UtcNow - _lightAlertCooldown;
 
             _humidityAlertCooldown = TimeSpan.FromSeconds(config.GetValue("TimeThresholds:HumidityAlertCooldownSeconds", 21600));
-            _lastHumidityAlert = DateTime.UtcNow - _lightAlertCooldown;
+            _lastHumidityAlert = DateTime.UtcNow - _humidityAlertCooldown;
 
             _logger.LogInformation(
                 "Thresholds loaded — SoilHumidity: {SMin}-{SMax}, Humidity: {HMin}-{HMax}, Temperature: {TMin}-{TMax}, Gas: {GMin}-{GMax}, Light: {LMin}-{LMax}, Cooldown: {Cooldown}",
@@ -109,7 +109,17 @@ namespace PiGrow.Services
 
                     // Only toggle the relay when the desired state differs from the current state.
                     if (shouldWater != _relayController.IsOn)
-                        await _relayController.SetStateAsync(shouldWater, stoppingToken);
+                    {
+                        // Watering loop
+                        while (shouldWater)
+                        {
+                            await _relayController.SetStateAsync(true, stoppingToken);
+                            //water 1s
+                            await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken);
+                            await _relayController.SetStateAsync(false, stoppingToken);
+                            shouldWater = EvaluateCondition(SoilHumidityTopic, _soilHumidityThreshold, currentlyActive: true);
+                        }
+                    }
 
                     if (EvaluateCondition(LightTopic, _lightThreshold, _lightAlertCooldown, ref _lastLightAlert))
                     {
@@ -126,13 +136,13 @@ namespace PiGrow.Services
                         }
                     }
 
-                    if (EvaluateCondition(LightTopic, _humidityThreshold, _humidityAlertCooldown, ref _lastHumidityAlert))
+                    if (EvaluateCondition(HumidityTopic, _humidityThreshold, _humidityAlertCooldown, ref _lastHumidityAlert))
                     {
                         try
                         {
                             await _ntfyService.NotifyAsync(
-                                "PiGrow: plant needs light",
-                                $"Humidity reading is below the configured minimum ({_lightThreshold.Min}). Please ventilate.",
+                                "PiGrow: plant needs humidity",
+                                $"Humidity reading is below the configured minimum ({_humidityThreshold.Min}). Please ventilate.",
                                 stoppingToken);
                         }
                         catch (Exception ex)
