@@ -39,7 +39,9 @@ namespace PiGrow.Services
 
         // Cooldown between low-light alerts so a dim afternoon doesn't spam the phone.
         private readonly TimeSpan _lightAlertCooldown;
+        private readonly TimeSpan _humidityAlertCooldown;
         private DateTime _lastLightAlert;
+        private DateTime _lastHumidityAlert;
 
         private readonly NtfyService _ntfyService;
 
@@ -67,6 +69,9 @@ namespace PiGrow.Services
 
             _lightAlertCooldown = TimeSpan.FromSeconds(config.GetValue("TimeThresholds:LightAlertCooldownSeconds", 21600));
             _lastLightAlert = DateTime.UtcNow - _lightAlertCooldown;
+
+            _humidityAlertCooldown = TimeSpan.FromSeconds(config.GetValue("TimeThresholds:HumidityAlertCooldownSeconds", 21600));
+            _lastHumidityAlert = DateTime.UtcNow - _lightAlertCooldown;
 
             _logger.LogInformation(
                 "Thresholds loaded — SoilHumidity: {SMin}-{SMax}, Humidity: {HMin}-{HMax}, Temperature: {TMin}-{TMax}, Gas: {GMin}-{GMax}, Light: {LMin}-{LMax}, Cooldown: {Cooldown}",
@@ -118,6 +123,21 @@ namespace PiGrow.Services
                         catch (Exception ex)
                         {
                             _logger.LogWarning(ex, "Light alert notification failed");
+                        }
+                    }
+
+                    if (EvaluateCondition(LightTopic, _humidityThreshold, _humidityAlertCooldown, ref _lastHumidityAlert))
+                    {
+                        try
+                        {
+                            await _ntfyService.NotifyAsync(
+                                "PiGrow: plant needs light",
+                                $"Humidity reading is below the configured minimum ({_lightThreshold.Min}). Please ventilate.",
+                                stoppingToken);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Humidity alert notification failed");
                         }
                     }
 
