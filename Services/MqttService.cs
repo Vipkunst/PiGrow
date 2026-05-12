@@ -66,8 +66,6 @@ namespace PiGrow.Services
         /// </summary>
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            await _mqttClient.ConnectAsync(_options, stoppingToken);
-
             var subscribeOptions = new MqttClientSubscribeOptionsBuilder()
                 .WithTopicFilter("sensor/bme680/gas")
                 .WithTopicFilter("sensor/bme680/humidity")
@@ -75,7 +73,34 @@ namespace PiGrow.Services
                 .WithTopicFilter("sensor/bodenfeuchte/prozent")
                 .Build();
 
-            await _mqttClient.SubscribeAsync(subscribeOptions, stoppingToken);
+            while (!stoppingToken.IsCancellationRequested)
+            {
+                try
+                {
+                    var result = await _mqttClient.ConnectAsync(_options, stoppingToken);
+
+                    if (result.ResultCode != MqttClientConnectResultCode.Success)
+                    {
+                        _logger.LogWarning("MQTT broker rejected connection: {ResultCode}. Retrying in 10s…", result.ResultCode);
+                        await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
+                        continue;
+                    }
+
+                    await _mqttClient.SubscribeAsync(subscribeOptions, stoppingToken);
+                    _logger.LogInformation("MQTT connected and subscribed.");
+
+                    await Task.Delay(Timeout.Infinite, stoppingToken);
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "MQTT error. Retrying in 10s…");
+                    await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
+                }
+            }
         }
 
         /// <summary>
